@@ -82,6 +82,7 @@
                             <tr>
                                 <th>ID</th>
                                 <th>Title</th>
+                                <th>Status</th>
                                 <th>Seeds</th>
                                 <th>Actions</th>
                             </tr>
@@ -89,25 +90,25 @@
                         <tbody>
                             {% for t in torrents %}
                             <tr>
-                                <td onclick="toggleDetails('{{ t['id'] }}')"><code>{{ t['id'] }}</code></td>
+                                <td><code>{{ t['id'] }}</code></td>
                                 <td onclick="toggleDetails('{{ t['id'] }}')"><strong>{{ t['title'] }}</strong></td>
+                                <td>
+                                    {% if t['status'] == 'LIVE' %}
+                                    <span class="badge bg-success">Live</span>
+                                    {% elif t['status'] == 'UNKNOWN' %}
+                                    <span class="badge bg-warning text-dark">Unknown</span>
+                                    {% else %}
+                                    <span class="badge bg-danger">Dead</span>
+                                    {% endif %}
+                                </td>
                                 <td class="text-success">{{ t['seeders'] }}</td>
                                 <td class="action-icons">
                                     <div class="d-flex gap-3">
                                         <a href="javascript:void(0)"
-                                            onclick="copyToClipboard('{{ t['magnet'] }}', 'Magnet')"
-                                            title="Copy Magnet">🧲</a>
-                                        <a href="javascript:void(0)"
-                                            onclick="copyToClipboard('https://pirate-proxy.thepiratebay.rocks/torrent/{{ t['id'] }}', 'Link')"
-                                            title="Copy Mirror Link" style="filter: hue-rotate(90deg);">🔗</a>
+                                            onclick="copyToClipboard('{{ t['magnet'] }}', 'Magnet')">🧲</a>
                                         <a href="https://pirate-proxy.thepiratebay.rocks/torrent/{{ t['id'] }}"
-                                            target="_blank" title="Launch Mirror Site">🚀</a>
+                                            target="_blank">🚀</a>
                                     </div>
-                                </td>
-                            </tr>
-                            <tr id="details-{{ t['id'] }}" class="d-none">
-                                <td colspan="4">
-                                    <div class="details-box" id="content-{{ t['id'] }}">Loading...</div>
                                 </td>
                             </tr>
                             {% endfor %}
@@ -118,7 +119,8 @@
                         <ul class="pagination justify-content-center flex-wrap">
                             {% for p in nav_pages %}
                             {% if loop.index > 1 and p > nav_pages[loop.index-2] + 1 %}<li class="page-item disabled">
-                                <span class="page-link">...</span></li>{% endif %}
+                                <span class="page-link">...</span>
+                            </li>{% endif %}
                             <li class="page-item {% if p == page %}active{% endif %}">
                                 <a class="page-link"
                                     href="{{ url_for('index', cat_name=current_cat, page=p, search=search_query) }}">{{

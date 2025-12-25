@@ -61,7 +61,7 @@ pirate-scraper/
 ### 2. Installation
 
 ```bash
-pip install flask requests beautifulsoup4
+pip install flask requests beautifulsoup4 colorama
 
 ```
 

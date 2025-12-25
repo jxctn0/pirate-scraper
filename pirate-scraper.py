@@ -11,10 +11,8 @@ from urllib.parse import urlparse, parse_qs
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from colorama import Fore, Style, init
 
-# Initialize Colorama
 init(autoreset=True)
 
-# --- Configuration ---
 DB_NAME = "tpb_archive.db"
 GB_LIMIT = 20
 
@@ -29,7 +27,7 @@ class ScraperState:
 
     def exit_gracefully(self, signum, frame):
         if self.keep_running:
-            print(f"\n{Fore.YELLOW}[!] Interruption detected. Finishing current batch...")
+            print(f"\n{Fore.YELLOW}[!] Interruption detected. Finishing batch...")
             self.keep_running = False
 
 def format_time(seconds):
@@ -51,7 +49,6 @@ def draw_ui(current, start, total, fail_streak, eta_secs):
     progress = done / total_to_do if total_to_do > 0 else 0
     filled = int(bar_len * progress)
     bar = '█' * filled + '-' * (bar_len - filled)
-    
     sys.stdout.write(f"\r\033[K|{bar}| {progress*100:5.1f}% | ETA: {format_time(eta_secs):<10} | Fail: {fail_streak:<3} | ID: {current}")
     sys.stdout.flush()
 
@@ -70,16 +67,19 @@ def get_resume_id(default_start, desc=False):
     if not os.path.exists(DB_NAME): return default_start
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
+    cursor.execute("SELECT id FROM (SELECT id FROM torrents UNION SELECT id FROM dead_ids)")
+    if cursor.fetchone() is None:
+        conn.close()
+        return default_start
+    
     if desc:
         cursor.execute("SELECT MIN(id) FROM (SELECT id FROM torrents UNION SELECT id FROM dead_ids)")
-        res = cursor.fetchone()[0]
-        conn.close()
-        return min(res - 1, default_start) if res else default_start
     else:
         cursor.execute("SELECT MAX(id) FROM (SELECT id FROM torrents UNION SELECT id FROM dead_ids)")
-        res = cursor.fetchone()[0]
-        conn.close()
-        return max(res + 1, default_start) if res else default_start
+    
+    res = cursor.fetchone()[0]
+    conn.close()
+    return (res - 1) if desc else (res + 1)
 
 def scrape_id(i, template, state):
     if not state.keep_running: return ("STOP", i)
@@ -87,6 +87,10 @@ def scrape_id(i, template, state):
     try:
         r = requests.get(target_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=7, allow_redirects=False)
         
+        # New [BLANK] Check: Connection successful but content is empty
+        if not r.text or not r.text.strip():
+            return ("BLANK", i, target_url)
+
         if r.status_code in [301, 302, 404]:
             return ("DEAD", i, target_url)
             
@@ -123,22 +127,13 @@ def main():
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("-c", "--clean", action="store_true")
     parser.add_argument("-d", "--desc", action="store_true")
-    parser.add_argument("--show_link", action="store_true", help="Display the URL being scraped in console")
+    parser.add_argument("--show_link", action="store_true")
     args = parser.parse_args()
 
     parsed = urlparse(args.link)
     if args.clean and os.path.exists(DB_NAME): os.remove(DB_NAME)
 
-    # Note: Using your starting point from Christmas 2025
     start_id = 81592417
-    
-    # Try to extract from link if provided, otherwise stick to 81592417
-    try:
-        if "/torrent/" in parsed.path:
-            start_id = int(parsed.path.rstrip('/').split('/')[-1])
-    except:
-        pass
-
     if not args.clean:
         start_id = get_resume_id(start_id, args.desc)
 
@@ -152,7 +147,7 @@ def main():
     cursor = conn.cursor()
     current_id = start_id
 
-    print(f"{Fore.CYAN}[*] Starting at: {start_id} | Target: {target_id} | Direction: {'DESC' if args.desc else 'ASC'}")
+    print(f"{Fore.CYAN}[*] Starting at: {start_id} | Target: {target_id} | Mode: {'DESC' if args.desc else 'ASC'}")
 
     with ThreadPoolExecutor(max_workers=args.threads) as executor:
         while state.keep_running:
@@ -160,16 +155,10 @@ def main():
             if not args.desc and current_id > target_id: break
 
             if os.path.exists(DB_NAME) and os.path.getsize(DB_NAME) / (1024**3) > GB_LIMIT:
-                print(f"\n{Fore.RED}[!] Database limit reached.")
+                print(f"\n{Fore.RED}[!] DB Limit reached.")
                 break
 
-            if args.desc:
-                end_range = max(current_id - args.threads, target_id - 1)
-                batch_ids = range(current_id, end_range, -1)
-            else:
-                end_range = min(current_id + args.threads, target_id + 1)
-                batch_ids = range(current_id, end_range)
-
+            batch_ids = range(current_id, (current_id - args.threads) if args.desc else (current_id + args.threads), -1 if args.desc else 1)
             futures = {executor.submit(scrape_id, tid, template, state): tid for tid in batch_ids}
             batch_results = {}
             for f in as_completed(futures):
@@ -179,10 +168,14 @@ def main():
             for tid in sorted(batch_results.keys(), reverse=args.desc):
                 res = batch_results[tid]
                 if res[0] == "STOP": continue
-                
                 url_display = f" | URL: {res[-1]}" if args.show_link else ""
 
-                if res[0] == "DEAD":
+                if res[0] == "BLANK":
+                    cursor.execute("INSERT OR REPLACE INTO torrents (id, title, status) VALUES (?,?,?)", (tid, "[Empty Content]", "BLANK"))
+                    state.consecutive_failures += 1
+                    sys.stdout.write(f"\r\033[K{Style.DIM}{Fore.WHITE}[BLK]  {tid}{url_display}\n")
+
+                elif res[0] == "DEAD":
                     cursor.execute("INSERT OR IGNORE INTO dead_ids (id) VALUES (?)", (tid,))
                     state.consecutive_failures += 1
                     if args.verbose:
@@ -192,10 +185,6 @@ def main():
                     cursor.execute("INSERT OR REPLACE INTO torrents (id, title, status) VALUES (?,?,?)", (tid, res[2], "UNKNOWN"))
                     state.consecutive_failures += 1
                     sys.stdout.write(f"\r\033[K{Fore.YELLOW}[UNK]  {tid} - {res[2][:30]}{url_display}\n")
-
-                elif res[0] == "ERROR":
-                    if args.verbose:
-                        sys.stdout.write(f"\r\033[K{Fore.RED}[ERR]  {tid} - {res[2][:30]}{url_display}\n")
 
                 elif res[0] == "LIVE":
                     state.consecutive_failures = 0
@@ -213,12 +202,11 @@ def main():
             current_id = (min(batch_ids) - 1) if args.desc else (max(batch_ids) + 1)
             elapsed = time.time() - state.start_time
             done = abs(current_id - state.initial_id)
-            remaining = abs(target_id - current_id)
-            eta = (elapsed / done) * remaining if done > 0 else 0
+            eta = (elapsed / done) * abs(target_id - current_id) if done > 0 else 0
             draw_ui(current_id, state.initial_id, target_id, state.consecutive_failures, eta)
 
     conn.close()
-    print(f"\n{Fore.CYAN}[*] Scrape complete. Total Hits: {state.total_scraped}")
+    print(f"\n{Fore.CYAN}[*] Scrape complete.")
 
 if __name__ == "__main__":
     main()

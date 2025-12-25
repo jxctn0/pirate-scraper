@@ -46,15 +46,13 @@ def format_time(seconds):
 
 def draw_ui(current, start, total, fail_streak, eta_secs):
     bar_len = 20
-    # Handle progress calculation for both ascending and descending
     total_to_do = abs(total - start)
     done = abs(current - start)
     progress = done / total_to_do if total_to_do > 0 else 0
-    
     filled = int(bar_len * progress)
     bar = '█' * filled + '-' * (bar_len - filled)
     
-    sys.stdout.write(f"\r\033[K|{bar}| {progress*100:5.1f}% | ETA: {format_time(eta_secs):<10} | Fail: {fail_streak:<3} | {current}")
+    sys.stdout.write(f"\r\033[K|{bar}| {progress*100:5.1f}% | ETA: {format_time(eta_secs):<10} | Fail: {fail_streak:<3} | ID: {current}")
     sys.stdout.flush()
 
 def init_db():
@@ -73,13 +71,11 @@ def get_resume_id(default_start, desc=False):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     if desc:
-        # Find the lowest ID we have and go down
         cursor.execute("SELECT MIN(id) FROM (SELECT id FROM torrents UNION SELECT id FROM dead_ids)")
         res = cursor.fetchone()[0]
         conn.close()
         return min(res - 1, default_start) if res else default_start
     else:
-        # Find the highest ID we have and go up
         cursor.execute("SELECT MAX(id) FROM (SELECT id FROM torrents UNION SELECT id FROM dead_ids)")
         res = cursor.fetchone()[0]
         conn.close()
@@ -87,19 +83,19 @@ def get_resume_id(default_start, desc=False):
 
 def scrape_id(i, template, state):
     if not state.keep_running: return ("STOP", i)
+    target_url = template.format(i)
     try:
-        r = requests.get(template.format(i), headers={'User-Agent': 'Mozilla/5.0'}, timeout=7, allow_redirects=False)
+        r = requests.get(target_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=7, allow_redirects=False)
         
         if r.status_code in [301, 302, 404]:
-            return ("DEAD", i)
+            return ("DEAD", i, target_url)
             
         soup = BeautifulSoup(r.text, 'html.parser')
         title_tag = soup.find('div', id='title') or soup.find('h1')
         title_text = title_tag.get_text(strip=True) if title_tag else ""
 
         if not title_tag or any(x in title_text for x in ["502", "Bad Gateway", "504", "Cloudflare"]):
-            sys.stdout.write(f"\r\033[K{Fore.YELLOW}[UNK]  {i} - Potential Gateway Error\n")
-            return ("UNKNOWN", i, title_text or "Gateway Error")
+            return ("UNKNOWN", i, title_text or "Gateway Error", target_url)
 
         category = "Unknown"
         type_label = soup.find('dt', string=re.compile(r'Type:', re.I))
@@ -113,39 +109,40 @@ def scrape_id(i, template, state):
         return ("LIVE", i, title_text, category, 
                 size_match.group(1) if size_match else "N/A", 
                 int(seed_match.group(1)) if seed_match else 0, 
-                magnet['href'] if magnet else "N/A")
+                magnet['href'] if magnet else "N/A", target_url)
 
-    except Exception:
-        return ("DEAD", i)
+    except Exception as e:
+        return ("ERROR", i, str(e), target_url)
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--link", required=True)
-    parser.add_argument("--max", type=int, default=81589633)
+    parser.add_argument("--max", type=int, default=3211770)
     parser.add_argument("--fail_limit", type=int, default=1000)
     parser.add_argument("--threads", type=int, default=50)
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("-c", "--clean", action="store_true")
-    parser.add_argument("-d", "--desc", action="store_true", help="Scrape downwards from start ID")
+    parser.add_argument("-d", "--desc", action="store_true")
+    parser.add_argument("--show_link", action="store_true", help="Display the URL being scraped in console")
     args = parser.parse_args()
 
     parsed = urlparse(args.link)
     if args.clean and os.path.exists(DB_NAME): os.remove(DB_NAME)
 
-    # Determine Start ID
+    # Note: Using your starting point from Christmas 2025
+    start_id = 81592417
+    
+    # Try to extract from link if provided, otherwise stick to 81592417
     try:
         if "/torrent/" in parsed.path:
             start_id = int(parsed.path.rstrip('/').split('/')[-1])
-        else:
-            query = parse_qs(parsed.query)
-            start_id = int(query.get('id', [3211594])[0])
     except:
-        start_id = 3211594
+        pass
 
     if not args.clean:
         start_id = get_resume_id(start_id, args.desc)
 
-    target_id = 1 if args.desc else args.max
+    target_id = args.max
     state = ScraperState(start_id, target_id)
     signal.signal(signal.SIGINT, state.exit_gracefully)
     
@@ -155,22 +152,18 @@ def main():
     cursor = conn.cursor()
     current_id = start_id
 
-    direction_str = "DESCENDING" if args.desc else "ASCENDING"
-    print(f"{Fore.CYAN}[*] Mode: {direction_str} | Start: {current_id} | Target: {target_id}")
+    print(f"{Fore.CYAN}[*] Starting at: {start_id} | Target: {target_id} | Direction: {'DESC' if args.desc else 'ASC'}")
 
     with ThreadPoolExecutor(max_workers=args.threads) as executor:
         while state.keep_running:
-            # Check loop exit condition
             if args.desc and current_id < target_id: break
             if not args.desc and current_id > target_id: break
 
             if os.path.exists(DB_NAME) and os.path.getsize(DB_NAME) / (1024**3) > GB_LIMIT:
-                print(f"\n{Fore.RED}[!] Database exceeds {GB_LIMIT}GB.")
+                print(f"\n{Fore.RED}[!] Database limit reached.")
                 break
 
-            # Generate batch range based on direction
             if args.desc:
-                # e.g., current is 100, threads 10 -> range(100, 89, -1) -> 100, 99...90
                 end_range = max(current_id - args.threads, target_id - 1)
                 batch_ids = range(current_id, end_range, -1)
             else:
@@ -183,48 +176,49 @@ def main():
                 res = f.result()
                 batch_results[res[1]] = res
 
-            # Process results in order
             for tid in sorted(batch_results.keys(), reverse=args.desc):
                 res = batch_results[tid]
                 if res[0] == "STOP": continue
-
-                if res[0] in ["DEAD", "UNKNOWN"]:
-                    if res[0] == "DEAD":
-                        cursor.execute("INSERT OR IGNORE INTO dead_ids (id) VALUES (?)", (tid,))
-                        state.consecutive_failures += 1
-                    else:
-                        # Mark Unknown as requested
-                        cursor.execute("INSERT OR REPLACE INTO torrents (id, title, status) VALUES (?,?,?)", (tid, res[2], "UNKNOWN"))
-                    
-                    if args.verbose:
-                        color = Fore.YELLOW if res[0] == "UNKNOWN" else Fore.WHITE
-                        sys.stdout.write(f"\r\033[K{Style.DIM}{color}[{res[0][:3]}] {tid}\n")
                 
+                url_display = f" | URL: {res[-1]}" if args.show_link else ""
+
+                if res[0] == "DEAD":
+                    cursor.execute("INSERT OR IGNORE INTO dead_ids (id) VALUES (?)", (tid,))
+                    state.consecutive_failures += 1
+                    if args.verbose:
+                        sys.stdout.write(f"\r\033[K{Style.DIM}[DEAD] {tid}{url_display}\n")
+
+                elif res[0] == "UNKNOWN":
+                    cursor.execute("INSERT OR REPLACE INTO torrents (id, title, status) VALUES (?,?,?)", (tid, res[2], "UNKNOWN"))
+                    state.consecutive_failures += 1
+                    sys.stdout.write(f"\r\033[K{Fore.YELLOW}[UNK]  {tid} - {res[2][:30]}{url_display}\n")
+
+                elif res[0] == "ERROR":
+                    if args.verbose:
+                        sys.stdout.write(f"\r\033[K{Fore.RED}[ERR]  {tid} - {res[2][:30]}{url_display}\n")
+
                 elif res[0] == "LIVE":
                     state.consecutive_failures = 0
                     cursor.execute("INSERT OR REPLACE INTO torrents (id, title, category, size, seeders, magnet, status) VALUES (?,?,?,?,?,?,?)", 
                                   (res[1], res[2], res[3], res[4], res[5], res[6], "LIVE"))
                     state.total_scraped += 1
                     if args.verbose:
-                        sys.stdout.write(f"\r\033[K{Fore.GREEN}[HIT]  {res[1]} | {res[2][:45]}\n")
+                        sys.stdout.write(f"\r\033[K{Fore.GREEN}[HIT]  {res[1]} | {res[2][:40]}{url_display}\n")
 
                 if args.fail_limit > 0 and state.consecutive_failures >= args.fail_limit:
                     state.keep_running = False
                     break
 
             conn.commit()
-            
-            # Update current_id and progress
             current_id = (min(batch_ids) - 1) if args.desc else (max(batch_ids) + 1)
             elapsed = time.time() - state.start_time
             done = abs(current_id - state.initial_id)
             remaining = abs(target_id - current_id)
             eta = (elapsed / done) * remaining if done > 0 else 0
-            
             draw_ui(current_id, state.initial_id, target_id, state.consecutive_failures, eta)
 
     conn.close()
-    print(f"\n{Fore.CYAN}[*] Done. Total hits: {state.total_scraped}")
+    print(f"\n{Fore.CYAN}[*] Scrape complete. Total Hits: {state.total_scraped}")
 
 if __name__ == "__main__":
     main()

@@ -148,7 +148,7 @@ def main():
                     if args.verbose:
                         sys.stdout.write(f"\r\033[K{Fore.GREEN}[HIT]  {res[0]} | {res[2]} | {res[1][:45]}\n")
 
-                if state.consecutive_failures >= args.fail_limit:
+                if args.fail_limit > 0 and state.consecutive_failures >= args.fail_limit:
                     print(f"\n{Fore.YELLOW}[!] Limit of {args.fail_limit} consecutive dead IDs reached.")
                     state.keep_running = False
                     break

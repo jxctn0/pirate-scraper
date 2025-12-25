@@ -1,0 +1,45 @@
+/* static/css/pirate.css */
+body {
+    background-color: #f5e1b5; /* Parchment beige */
+    color: #5c3c10;
+    font-family: "Times New Roman", Times, serif;
+}
+
+.sidebar {
+    background-color: #e6cfa3;
+    border-right: 2px solid #d2b48c;
+}
+
+.sidebar h4 { color: #8b4513; text-transform: uppercase; letter-spacing: 1px; }
+
+.table {
+    background-color: #ffffff;
+    border: 1px solid #d2b48c;
+}
+
+thead {
+    background-color: #d2b48c;
+    color: #5c3c10;
+    text-transform: uppercase;
+    font-size: 0.9rem;
+}
+
+.torrent-row:hover { background-color: #fdf5e6; }
+
+/* Links */
+a { color: #0000ee; }
+.nav-active { background-color: #8b4513; color: white !important; padding: 2px 5px; }
+
+/* Buttons & Forms */
+.btn-primary { background-color: #8b4513; border: 1px solid #5c3c10; }
+.form-control { border: 1px solid #d2b48c; border-radius: 0; }
+
+.pagination .page-link {
+    background-color: #fff;
+    color: #8b4513;
+    border-radius: 0;
+}
+.pagination .active .page-link {
+    background-color: #8b4513;
+    border-color: #5c3c10;
+}

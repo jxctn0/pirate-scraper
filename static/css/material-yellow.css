@@ -1,0 +1,7 @@
+@import url('material-base.css');
+:root {
+    --primary: #fbc02d;
+    --accent: #fff176;
+}
+/* Yellow often needs dark text for buttons */
+.active .page-link, .btn-primary { color: #000 !important; }

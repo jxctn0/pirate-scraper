@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Pirate Archive Explorer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link id="theme-stylesheet" rel="stylesheet" href="{{ url_for('static', filename='css/material-teal.css') }}">
+</head>
+
+<body>
+
+    <div id="copyToast">Action successful!</div>
+
+    <div class="container-fluid">
+        <div class="row">
+            <div class="col-md-3 col-lg-2 sidebar">
+                <h4 class="mb-4">🏴‍☠️ Explorer</h4>
+
+                <select id="themePicker" class="form-select form-select-sm mb-4" onchange="changeTheme(this.value)">
+                    <option value="material-teal">Material Teal</option>
+                    <option value="material-pink">Material Pink</option>
+                    <option value="material-blue">Material Blue</option>
+                    <option value="material-yellow">Material Yellow</option>
+                    <option value="pirate">Classic Pirate</option>
+                    <option value="simplehtml">Simple HTML</option>
+                </select>
+
+                <div class="accordion accordion-flush" id="catAccordion">
+                    {% for parent, children in category_tree.items() %}
+                    <div class="accordion-item bg-transparent border-0">
+                        <div class="accordion-header d-flex align-items-center">
+                            <a href="{{ url_for('index', cat_name=parent) }}"
+                                class="text-decoration-none small flex-grow-1 {% if current_cat == parent %}nav-active{% endif %}"
+                                style="color:inherit">{{ parent }}</a>
+                            <button class="accordion-button collapsed bg-transparent shadow-none w-auto p-1"
+                                type="button" data-bs-toggle="collapse"
+                                data-bs-target="#collapse{{ loop.index }}"></button>
+                        </div>
+                        <div id="collapse{{ loop.index }}"
+                            class="accordion-collapse collapse {% if current_cat and parent in current_cat %}show{% endif %}">
+                            <div class="accordion-body p-0 ps-3">
+                                {% for full_cat in children %}
+                                <a href="{{ url_for('index', cat_name=full_cat) }}"
+                                    class="d-block py-1 small text-decoration-none {% if full_cat == current_cat %}nav-active{% endif %}"
+                                    style="color:inherit">
+                                    {{ full_cat.split(' > ')[-1] }}
+                                </a>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="col-md-9 col-lg-10 p-4">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <nav aria-label="breadcrumb">
+                        <ol class="breadcrumb m-0">
+                            <li class="breadcrumb-item"><a href="/">Home</a></li>
+                            {% for bc in breadcrumbs %}
+                            <li class="breadcrumb-item {% if loop.last %}active{% endif %}">
+                                {% if not loop.last %}<a href="{{ url_for('index', cat_name=bc.path) }}">{{ bc.name
+                                    }}</a>{% else %}{{ bc.name }}{% endif %}
+                            </li>
+                            {% endfor %}
+                        </ol>
+                    </nav>
+                    <div class="d-flex gap-2">
+                        <input type="number" id="jumpInput" class="form-control form-control-sm" style="width:80px"
+                            placeholder="Page" onkeydown="if(event.key==='Enter') jumpTo()">
+                        <form action="/" method="get"><input type="text" name="search"
+                                class="form-control form-control-sm" placeholder="Search..." value="{{ search_query }}">
+                        </form>
+                    </div>
+                </div>
+
+                <div class="table-responsive border rounded p-3">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Title</th>
+                                <th>Seeds</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for t in torrents %}
+                            <tr>
+                                <td onclick="toggleDetails('{{ t['id'] }}')"><code>{{ t['id'] }}</code></td>
+                                <td onclick="toggleDetails('{{ t['id'] }}')"><strong>{{ t['title'] }}</strong></td>
+                                <td class="text-success">{{ t['seeders'] }}</td>
+                                <td class="action-icons">
+                                    <div class="d-flex gap-3">
+                                        <a href="javascript:void(0)"
+                                            onclick="copyToClipboard('{{ t['magnet'] }}', 'Magnet')"
+                                            title="Copy Magnet">🧲</a>
+                                        <a href="javascript:void(0)"
+                                            onclick="copyToClipboard('https://pirate-proxy.thepiratebay.rocks/torrent/{{ t['id'] }}', 'Link')"
+                                            title="Copy Mirror Link" style="filter: hue-rotate(90deg);">🔗</a>
+                                        <a href="https://pirate-proxy.thepiratebay.rocks/torrent/{{ t['id'] }}"
+                                            target="_blank" title="Launch Mirror Site">🚀</a>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr id="details-{{ t['id'] }}" class="d-none">
+                                <td colspan="4">
+                                    <div class="details-box" id="content-{{ t['id'] }}">Loading...</div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+
+                    <nav class="mt-4">
+                        <ul class="pagination justify-content-center flex-wrap">
+                            {% for p in nav_pages %}
+                            {% if loop.index > 1 and p > nav_pages[loop.index-2] + 1 %}<li class="page-item disabled">
+                                <span class="page-link">...</span></li>{% endif %}
+                            <li class="page-item {% if p == page %}active{% endif %}">
+                                <a class="page-link"
+                                    href="{{ url_for('index', cat_name=current_cat, page=p, search=search_query) }}">{{
+                                    p }}</a>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    </nav>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function changeTheme(v) {
+            document.getElementById('theme-stylesheet').href = `/static/css/${v}.css`;
+            localStorage.setItem('theme', v);
+        }
+        function jumpTo() {
+            const p = document.getElementById('jumpInput').value;
+            const url = new URL(window.location.href);
+            url.searchParams.set('page', p);
+            window.location.href = url.toString();
+        }
+        function copyToClipboard(text, type) {
+            navigator.clipboard.writeText(text).then(() => {
+                const toast = document.getElementById('copyToast');
+                toast.innerText = `📋 ${type} copied to clipboard!`;
+                toast.style.display = 'block';
+                setTimeout(() => { toast.style.display = 'none'; }, 2000);
+            });
+        }
+        async function toggleDetails(id) {
+            const r = document.getElementById(`details-${id}`);
+            const c = document.getElementById(`content-${id}`);
+            r.classList.toggle('d-none');
+            if (!r.classList.contains('d-none') && c.innerText === "Loading...") {
+                const res = await fetch(`/get_details/${id}`);
+                const data = await res.json();
+                c.innerText = data.description || "No data.";
+            }
+        }
+        window.onload = () => {
+            const saved = localStorage.getItem('theme') || 'material-teal';
+            changeTheme(saved);
+            document.getElementById('themePicker').value = saved;
+        }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+
+</html>

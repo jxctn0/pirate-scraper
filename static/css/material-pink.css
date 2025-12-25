@@ -1,0 +1,5 @@
+@import url('material-base.css');
+:root {
+    --primary: #d81b60;
+    --accent: #f48fb1;
+}

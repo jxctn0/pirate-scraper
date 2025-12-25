@@ -1,0 +1,42 @@
+body {
+    background: white !important;
+    color: black !important;
+    font-family: serif !important;
+}
+
+* {
+    border-radius: 0 !important;
+    box-shadow: none !important;
+}
+
+.sidebar {
+    background: #eee !important;
+    border-right: 2px solid black !important;
+}
+
+.table {
+    border: 2px solid black !important;
+}
+
+thead {
+    background: #ccc !important;
+}
+
+.details-box {
+    background: white !important;
+    color: black !important;
+    border: 1px dotted black !important;
+}
+
+.page-link,
+.btn,
+.form-control {
+    border: 1px solid black !important;
+    background: white !important;
+    color: black !important;
+}
+
+.active .page-link {
+    background: black !important;
+    color: white !important;
+}
